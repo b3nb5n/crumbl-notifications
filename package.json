@@ -1,0 +1,14 @@
+{
+	"name": "crumbl-notifications",
+	"version": "1.0.0",
+	"private": true,
+	"main": "index.js",
+	"scripts": {
+		"start": "node index.js",
+		"build": "docker build -t crumbl-notifications",
+		"deploy": "gcloud builds submit --tag gcr.io/playground-aadb4/helloworld && gcloud run deploy --image gcr.io/playground-aadb4/helloworld --platform managed"
+	},
+	"dependencies": {
+		"puppeteer": "^9.0.0"
+	}
+}
