@@ -9,6 +9,8 @@
 		"deploy": "gcloud builds submit --tag gcr.io/playground-aadb4/helloworld && gcloud run deploy --image gcr.io/playground-aadb4/helloworld --platform managed"
 	},
 	"dependencies": {
-		"puppeteer": "^9.0.0"
+		"dotenv": "^8.2.0",
+		"puppeteer": "8.0.0",
+		"twilio": "^3.61.0"
 	}
 }

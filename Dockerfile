@@ -1,6 +1,6 @@
-FROM node:12-slim
+FROM buildkite/puppeteer:8.0.0
 
-WORKDIR /usr/src/app
+WORKDIR /app
 
 COPY package*.json ./
 
@@ -8,4 +8,4 @@ RUN npm install --only=production
 
 COPY . ./
 
-CMD [ "node", "index.js" ]
+CMD ["npm", "run", "start"]
