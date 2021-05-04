@@ -1,8 +1,9 @@
 const puppeteer = require('puppeteer');
 const twilio = require('twilio');
+const app = require('express')();
 require('dotenv').config();
 
-(async () => {
+app.post('/', async (_, res) => {
 	const browser = await puppeteer.launch({
 		args: ['--no-sandbox', '--disable-gpu'],
 	});
@@ -24,9 +25,16 @@ require('dotenv').config();
 
 	const { TWILIO_SID, TWILIO_TOKEN, RECIPIANT_PHONE } = process.env;
 	const client = twilio(TWILIO_SID, TWILIO_TOKEN);
+
+	res.send(message);
 	await client.messages.create({
 		body: message,
 		to: RECIPIANT_PHONE,
 		from: '+14804000695',
 	});
-})();
+});
+
+const port = 80;
+app.listen(port, () => {
+	console.log(`listening on port ${port}...`);
+});
