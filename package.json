@@ -9,6 +9,7 @@
 		"deploy": "gcloud builds submit --tag gcr.io/playground-aadb4/helloworld && gcloud run deploy --image gcr.io/playground-aadb4/helloworld --platform managed"
 	},
 	"dependencies": {
+		"@types/express": "^4.17.11",
 		"dotenv": "^8.2.0",
 		"express": "^4.17.1",
 		"puppeteer": "8.0.0",
