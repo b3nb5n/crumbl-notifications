@@ -1,2 +1,3 @@
 node_modules
-recipiants.json
+.env
+.DS_Store

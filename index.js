@@ -3,6 +3,10 @@ const twilio = require('twilio');
 const app = require('express')();
 require('dotenv').config();
 
+app.get('/ack', (req, res) => {
+	res.send('ACK');
+});
+
 app.post('/', async (req, res) => {
 	try {
 		const browser = await puppeteer.launch({
