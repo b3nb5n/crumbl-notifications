@@ -1,10 +1,11 @@
+const admin = require('firebase-admin');
 const puppeteer = require('puppeteer');
 const twilio = require('twilio');
 const app = require('express')();
 require('dotenv').config();
 
-app.get('/ack', (req, res) => {
-	res.send('ACK');
+admin.initializeApp({
+	credential: admin.credential.applicationDefault(),
 });
 
 app.post('/', async (req, res) => {
@@ -28,16 +29,23 @@ app.post('/', async (req, res) => {
 		const cookieList = cookies.map((name) => `🍪 ${name}`).join('\n');
 		const message = `This weeks Crumbl flavors are:\n${cookieList}\n\n`;
 
-		const recipiant = req.query.recipiant;
-		if (!recipiant) return res.send(message);
-
 		const { TWILIO_SID, TWILIO_TOKEN } = process.env;
 		const client = twilio(TWILIO_SID, TWILIO_TOKEN);
 
-		await client.messages.create({
-			body: message,
-			to: recipiant,
-			from: '+14804000695',
+		const recipiantsSnap = await admin.firestore().collection('recipiants').get();
+		recipiantsSnap.forEach(async (doc) => {
+			const { phone, name } = doc.data();
+			console.log(`sending to ${name} at ${phone}`);
+
+			try {
+				await client.messages.create({
+					body: message,
+					to: phone,
+					from: '+14804000695',
+				});
+			} catch (err) {
+				throw `Error sending message: ${err}`;
+			}
 		});
 
 		return res.send(message);
@@ -48,7 +56,7 @@ app.post('/', async (req, res) => {
 	}
 });
 
-const port = 8080;
+const port = parseInt(process.env.PORT) || 8080;
 app.listen(port, () => {
 	console.log(`listening on port ${port}...`);
 });
