@@ -4,16 +4,16 @@
 	"private": true,
 	"main": "index.js",
 	"scripts": {
-		"start": "node index.js",
-		"build": "docker build -t crumbl-notifications",
-		"deploy": "gcloud builds submit --tag gcr.io/playground-aadb4/helloworld && gcloud run deploy --image gcr.io/playground-aadb4/helloworld --platform managed"
+		"build": "tsc",
+		"start": "npm run build && node build/index.js"
 	},
 	"dependencies": {
-		"@types/express": "^4.17.11",
-		"dotenv": "^8.2.0",
-		"express": "^4.17.1",
 		"firebase-admin": "^9.8.0",
-		"puppeteer": "8.0.0",
-		"twilio": "^3.61.0"
+		"firebase-functions": "^3.16.0",
+		"puppeteer": "^13.0.1",
+		"twilio": "^3.72.0"
+	},
+	"devDependencies": {
+		"typescript": "^4.5.4"
 	}
 }
