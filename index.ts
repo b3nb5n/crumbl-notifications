@@ -3,7 +3,18 @@ import * as functions from 'firebase-functions';
 import puppeteer from 'puppeteer';
 import twilio from 'twilio';
 
+interface Flavors {
+	cookies: string[];
+	iceCream: string[];
+}
+
 const firebase = admin.initializeApp();
+const CRUMBL_URL = 'crumblcookies.com';
+const runtimeOptions: functions.RuntimeOptions = {
+	memory: '256MB',
+	timeoutSeconds: 30,
+	maxInstances: 1,
+};
 
 const getRecipients = async () => {
 	const db = admin.firestore(firebase);
@@ -11,16 +22,11 @@ const getRecipients = async () => {
 	return recipientsSnap.docs.map((doc) => doc.data().phone as string);
 };
 
-interface Flavors {
-	cookies: string[];
-	iceCream: string[];
-}
-
 const getFlavors = async (): Promise<Flavors> => {
 	const browser = await puppeteer.launch();
 	const page = (await browser.pages())[0] ?? (await browser.newPage());
 
-	await page.goto('https://crumblcookies.com/');
+	await page.goto(CRUMBL_URL);
 	const flavors = (await page.evaluate(() =>
 		Array.from(
 			document.querySelectorAll('#weekly-cookie-flavors h3:nth-child(-n+6)')
@@ -45,8 +51,7 @@ const formatFlavors = (flavors: Flavors) => {
 		.join('\n');
 
 	const TITLE = 'This weeks crumbl flavors are:';
-	const URL = 'crumblcookies.com';
-	return `${TITLE}\n\n${cookieFlavors}\n\n${iceCreamFlavors}\n\n${URL}`;
+	return `${TITLE}\n\n${cookieFlavors}\n\n${iceCreamFlavors}\n\n${CRUMBL_URL}`;
 };
 
 const getTwilioClient = () => {
@@ -81,12 +86,6 @@ const crumblNotifier = async (recipients: string[]) => {
 	}
 };
 
-const runtimeOptions: functions.RuntimeOptions = {
-	memory: '256MB',
-	timeoutSeconds: 30,
-	maxInstances: 1,
-};
-
 if (process.env.FUNCTIONS_EMULATOR) {
 	exports.getFlavors = functions
 		.runWith(runtimeOptions)
@@ -102,32 +101,25 @@ if (process.env.FUNCTIONS_EMULATOR) {
 	exports.notify = functions
 		.runWith(runtimeOptions)
 		.https.onRequest(async (req, res) => {
-			if (
-				typeof req.body !== 'object' ||
-				!Array.isArray(req.body.recipients) ||
-				!req.body.recipients.every(
-					(recipient: any) => typeof recipient === 'string'
-				)
-			) {
-				res.status(400).send({ error: 'Invalid request body' });
-				return;
-			}
-
 			try {
-				const recipients = req.body.recipients as string[];
+				const recipients =
+					typeof req.query.recipient === 'string'
+						? [req.query.recipient as string]
+						: await getRecipients();
+
 				await crumblNotifier(recipients);
 				res.sendStatus(200);
 			} catch (e) {
 				res.status(500).send(e);
 			}
 		});
+} else {
+	exports.notifier = functions
+		.runWith(runtimeOptions)
+		.pubsub.schedule('30 18 * * 0')
+		.timeZone('America/Phoenix')
+		.onRun(async () => {
+			const recipients = await getRecipients();
+			await crumblNotifier(recipients);
+		});
 }
-
-exports.notifier = functions
-	.runWith(runtimeOptions)
-	.pubsub.schedule('30 18 * * 0')
-	.timeZone('America/Phoenix')
-	.onRun(async () => {
-		const recipients = await getRecipients();
-		await crumblNotifier(recipients);
-	});

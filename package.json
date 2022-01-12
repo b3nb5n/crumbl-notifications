@@ -5,7 +5,8 @@
 	"main": "index.js",
 	"scripts": {
 		"build": "tsc",
-		"start": "npm run build && node build/index.js"
+		"start": "firebase emulators:start",
+		"deploy": "firebase deploy --only functions"
 	},
 	"dependencies": {
 		"firebase-admin": "^9.8.0",
