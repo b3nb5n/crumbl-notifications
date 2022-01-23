@@ -6,6 +6,7 @@
 	"scripts": {
 		"build": "tsc",
 		"start": "firebase emulators:start",
+		"predeploy": "npm run build",
 		"deploy": "firebase deploy --only functions"
 	},
 	"dependencies": {
