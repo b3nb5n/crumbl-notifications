@@ -3,10 +3,7 @@ import * as functions from 'firebase-functions';
 import puppeteer from 'puppeteer';
 import twilio from 'twilio';
 
-interface Flavors {
-	cookies: string[];
-	iceCream: string[];
-}
+type Flavors = string[];
 
 const firebase = admin.initializeApp();
 const CRUMBL_URL = 'crumblcookies.com';
@@ -27,26 +24,20 @@ const getFlavors = async (): Promise<Flavors> => {
 
 	await page.goto(`https://${CRUMBL_URL}`);
 	const flavors = (await page.evaluate(() =>
-		Array.from(document.querySelectorAll('#weekly-cookie-flavors h3:nth-child(-n+6)'))
+		Array.from(document.querySelectorAll('#weekly-cookie-flavors h3'))
 			.map((element) => element.textContent?.trim())
 			.filter((flavor) => typeof flavor === 'string')
 	)) as string[];
 
 	await page.close();
 	await browser.close();
-
-	return {
-		cookies: flavors.slice(0, 6),
-		iceCream: flavors.slice(6),
-	};
+	return flavors.slice(0, 6);
 };
 
 const formatFlavors = (flavors: Flavors) => {
-	const cookieFlavors = flavors.cookies.map((flavor) => `🍪 ${flavor}`).join('\n');
-	const iceCreamFlavors = flavors.iceCream.map((flavor) => `🍦 ${flavor}`).join('\n');
-
 	const TITLE = 'This weeks crumbl flavors are:';
-	return `${TITLE}\n\n${cookieFlavors}\n\n${iceCreamFlavors}\n\n${CRUMBL_URL}`;
+	const flavorsString = flavors.map((flavor) => `🍪 ${flavor}`).join('\n');
+	return `${TITLE}\n\n${flavorsString}\n\n${CRUMBL_URL}`;
 };
 
 const getTwilioClient = () => {
