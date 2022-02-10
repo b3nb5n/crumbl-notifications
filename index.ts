@@ -5,6 +5,11 @@ import twilio from 'twilio';
 
 type Flavors = string[];
 
+interface Recipient {
+	name: string;
+	phone: string;
+}
+
 const firebase = admin.initializeApp();
 const CRUMBL_URL = 'crumblcookies.com';
 const runtimeOptions: functions.RuntimeOptions = {
@@ -15,7 +20,7 @@ const runtimeOptions: functions.RuntimeOptions = {
 const getRecipients = async () => {
 	const db = admin.firestore(firebase);
 	const recipientsSnap = await db.collection('recipients').get();
-	return recipientsSnap.docs.map((doc) => doc.data().phone as string);
+	return recipientsSnap.docs.map((doc) => doc.data() as Recipient);
 };
 
 const getFlavors = async (): Promise<Flavors> => {
@@ -34,10 +39,10 @@ const getFlavors = async (): Promise<Flavors> => {
 	return flavors.slice(0, 6);
 };
 
-const formatFlavors = (flavors: Flavors) => {
-	const TITLE = 'This weeks crumbl flavors are:';
+const formatFlavors = (name: string, flavors: Flavors) => {
+	const greeting = `Hey ${name}, this weeks crumbl flavors are:`;
 	const flavorsString = flavors.map((flavor) => `🍪 ${flavor}`).join('\n');
-	return `${TITLE}\n\n${flavorsString}\n\n${CRUMBL_URL}`;
+	return `${greeting}\n\n${flavorsString}\n\n${CRUMBL_URL}`;
 };
 
 const getTwilioClient = () => {
@@ -54,15 +59,15 @@ const notify = async (smsClient: twilio.Twilio, from: string, to: string, body: 
 	}
 };
 
-const crumblNotifier = async (recipients: string[]) => {
+const crumblNotifier = async (recipients: Recipient[]) => {
 	if (recipients.length === 0) return;
 
 	const flavors = await getFlavors();
-	const message = formatFlavors(flavors);
 	const smsClient = getTwilioClient();
 	const { sender } = functions.config().twilio;
 
-	for (const phone of recipients) {
+	for (const { name, phone } of recipients) {
+		const message = formatFlavors(name, flavors);
 		await notify(smsClient, sender, phone, message);
 	}
 };
@@ -78,9 +83,10 @@ exports.getFlavors = functions.runWith(runtimeOptions).https.onRequest(async (_,
 
 exports.notify = functions.runWith(runtimeOptions).https.onRequest(async (req, res) => {
 	try {
+		const { name, phone } = req.query;
 		const recipients =
-			typeof req.query.recipient === 'string'
-				? [req.query.recipient as string]
+			typeof name === 'string' && typeof phone === 'string'
+				? [{ name, phone }]
 				: await getRecipients();
 
 		await crumblNotifier(recipients);
