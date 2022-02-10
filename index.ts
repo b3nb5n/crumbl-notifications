@@ -1,6 +1,7 @@
+import * as axios from 'axios';
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions';
-import puppeteer from 'puppeteer';
+import { JSDOM } from 'jsdom';
 import twilio from 'twilio';
 
 type Flavors = string[];
@@ -24,19 +25,16 @@ const getRecipients = async () => {
 };
 
 const getFlavors = async (): Promise<Flavors> => {
-	const browser = await puppeteer.launch();
-	const page = (await browser.pages())[0] ?? (await browser.newPage());
+	const { data } = await axios.default.get(`https://${CRUMBL_URL}`);
+	if (typeof data !== 'string') throw TypeError('Invalid response data');
+	const dom = new JSDOM(data);
 
-	await page.goto(`https://${CRUMBL_URL}`);
-	const flavors = (await page.evaluate(() =>
-		Array.from(document.querySelectorAll('#weekly-cookie-flavors h3'))
-			.map((element) => element.textContent?.trim())
-			.filter((flavor) => typeof flavor === 'string')
-	)) as string[];
+	const flavors = Array.from(dom.window.document.querySelectorAll('#weekly-cookie-flavors h3'))
+		.map((element) => element.textContent?.trim())
+		.filter((flavor) => typeof flavor === 'string')
+		.slice(0, 6);
 
-	await page.close();
-	await browser.close();
-	return flavors.slice(0, 6);
+	return flavors as string[];
 };
 
 const formatFlavors = (name: string, flavors: Flavors) => {
@@ -72,7 +70,7 @@ const crumblNotifier = async (recipients: Recipient[]) => {
 	}
 };
 
-exports.getFlavors = functions.runWith(runtimeOptions).https.onRequest(async (_, res) => {
+exports.flavors = functions.runWith(runtimeOptions).https.onRequest(async (_, res) => {
 	try {
 		const flavors = await getFlavors();
 		res.send(flavors);
