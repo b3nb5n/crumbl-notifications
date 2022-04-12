@@ -4,102 +4,87 @@ import * as functions from 'firebase-functions';
 import { JSDOM } from 'jsdom';
 import twilio from 'twilio';
 
-type Flavors = string[];
-
 interface Recipient {
-	name: string;
-	phone: string;
+	name: string
+	phone: string
 }
 
-const firebase = admin.initializeApp();
-const CRUMBL_URL = 'crumblcookies.com';
-const runtimeOptions: functions.RuntimeOptions = {
-	memory: '512MB',
-	timeoutSeconds: 60,
-};
+const firebase = admin.initializeApp()
+const CRUMBL_URL = 'crumblcookies.com'
 
-const getRecipients = async () => {
-	const db = admin.firestore(firebase);
-	const recipientsSnap = await db.collection('recipients').get();
-	return recipientsSnap.docs.map((doc) => doc.data() as Recipient);
-};
+// Retrieves the recipients from the database
+const fetchRecipients = async () => {
+	const db = admin.firestore(firebase)
+	const recipientsSnap = await db.collection('recipients').get()
+	return recipientsSnap.docs.map((doc) => doc.data() as Recipient)
+}
 
-const getFlavors = async (): Promise<Flavors> => {
-	const { data } = await axios.default.get(`https://${CRUMBL_URL}`);
-	if (typeof data !== 'string') throw TypeError('Invalid response data');
-	const dom = new JSDOM(data);
+// Retrieves the names of the current flavors from the crumbl website
+const fetchFlavors = async (): Promise<string[]> => {
+	const { data, status } = await axios.default.get(`https://${CRUMBL_URL}`)
+	if (status != 200) throw new Error('Error fetching crumbl homepage')
 
+	// Parse the names of the cookies from the response
+	const dom = new JSDOM(data)
 	const flavors = Array.from(dom.window.document.querySelectorAll('#weekly-cookie-flavors h3'))
 		.map((element) => element.textContent?.trim())
 		.filter((flavor) => typeof flavor === 'string')
-		.slice(0, 6);
+		.slice(0, 6)
 
-	return flavors as string[];
-};
+	return flavors as string[]
+}
 
-const formatFlavors = (name: string, flavors: Flavors) => {
-	const greeting = `Hey ${name}, this weeks crumbl flavors are:`;
-	const flavorsString = flavors.map((flavor) => `🍪 ${flavor}`).join('\n');
-	return `${greeting}\n\n${flavorsString}\n\n${CRUMBL_URL}`;
-};
+// Formats a recipient and a list of flavors into a text message body
+const formatMessage = (recipient: Recipient, flavors: string[]) => {
+	const greeting = `Hey ${recipient.name}, this weeks crumbl flavors are:`
+	const flavorsString = flavors.map((flavor) => `🍪 ${flavor}`).join('\n')
+	return `${greeting}\n\n${flavorsString}\n\n${CRUMBL_URL}`
+}
 
-const getTwilioClient = () => {
-	const { sid, token } = functions.config().twilio;
-	return twilio(sid, token);
-};
-
-const notify = async (smsClient: twilio.Twilio, from: string, to: string, body: string) => {
-	try {
-		functions.logger.debug(`Notifying ${to}`);
-		await smsClient.messages.create({ from, to, body });
-	} catch (e) {
-		functions.logger.error(`Error notifying ${to}:`, e);
-	}
-};
-
+// Sends the current crumbl flavors to each of the given recipients
 const crumblNotifier = async (recipients: Recipient[]) => {
-	if (recipients.length === 0) return;
+	if (recipients.length === 0) return
+	const flavors = await fetchFlavors()
 
-	const flavors = await getFlavors();
-	const smsClient = getTwilioClient();
-	const { sender } = functions.config().twilio;
+	const { sid, token, sender } = functions.config().twilio
+	const smsClient = twilio(sid, token)
+	const messages = recipients.map((recipient) =>
+		smsClient.messages.create({
+			from: sender,
+			to: recipient.phone,
+			body: formatMessage(recipient, flavors),
+		})
+	)
 
-	for (const { name, phone } of recipients) {
-		const message = formatFlavors(name, flavors);
-		await notify(smsClient, sender, phone, message);
-	}
-};
+	// Wait for all of the messages to send before returning
+	await Promise.all(messages)
+}
 
-exports.flavors = functions.runWith(runtimeOptions).https.onRequest(async (_, res) => {
+// Sends the current crumbl flavors to the given recipient
+exports.notify = functions.https.onRequest(async (req, res) => {
 	try {
-		const flavors = await getFlavors();
-		res.send(flavors);
+		// get recipient data from the request url query parameters
+		// if a valid recipient wasn't provided, default to stored recipients
+		const { name, phone } = req.query
+		if (typeof name !== 'string' || typeof phone !== 'string') {
+			res.sendStatus(400)
+			return
+		}
+
+		// send current crumbl flavors to the recipient(s)
+		await crumblNotifier([{ name, phone }])
+		res.sendStatus(200)
 	} catch (e) {
-		res.status(500).send({ error: e });
+		console.error(e)
+		res.sendStatus(500)
 	}
-});
+})
 
-exports.notify = functions.runWith(runtimeOptions).https.onRequest(async (req, res) => {
-	try {
-		const { name, phone } = req.query;
-		const recipients =
-			typeof name === 'string' && typeof phone === 'string'
-				? [{ name, phone }]
-				: await getRecipients();
-
-		await crumblNotifier(recipients);
-		res.sendStatus(200);
-	} catch (e) {
-		res.status(500).send(e);
-	}
-});
-
-exports.notifier = functions
-	.runWith(runtimeOptions)
-	.pubsub.schedule('30 18 * * 0')
+// Every sunday at 6:30pm send the crumbl flavors to the stored recipients
+exports.notifier = functions.pubsub
+	.schedule('30 18 * * 0')
 	.timeZone('America/Phoenix')
 	.onRun(async () => {
-		console.log('Running notifier');
-		const recipients = await getRecipients();
-		await crumblNotifier(recipients);
-	});
+		const recipients = await fetchRecipients()
+		await crumblNotifier(recipients)
+	})
