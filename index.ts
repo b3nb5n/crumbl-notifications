@@ -60,28 +60,8 @@ const crumblNotifier = async (recipients: Recipient[]) => {
 	await Promise.all(messages)
 }
 
-// Sends the current crumbl flavors to the given recipient
-exports.notify = functions.https.onRequest(async (req, res) => {
-	try {
-		// get recipient data from the request url query parameters
-		// if a valid recipient wasn't provided, default to stored recipients
-		const { name, phone } = req.query
-		if (typeof name !== 'string' || typeof phone !== 'string') {
-			res.sendStatus(400)
-			return
-		}
-
-		// send current crumbl flavors to the recipient(s)
-		await crumblNotifier([{ name, phone }])
-		res.sendStatus(200)
-	} catch (e) {
-		console.error(e)
-		res.sendStatus(500)
-	}
-})
-
 // Every sunday at 6:30pm send the crumbl flavors to the stored recipients
-exports.notifier = functions.pubsub
+export const notifier = functions.pubsub
 	.schedule('30 18 * * 0')
 	.timeZone('America/Phoenix')
 	.onRun(async () => {
