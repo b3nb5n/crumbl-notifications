@@ -1,8 +1,8 @@
-import * as axios from 'axios';
-import * as admin from 'firebase-admin';
-import * as functions from 'firebase-functions';
-import { JSDOM } from 'jsdom';
-import twilio from 'twilio';
+import * as axios from 'axios'
+import * as admin from 'firebase-admin'
+import * as functions from 'firebase-functions'
+import { JSDOM } from 'jsdom'
+import twilio from 'twilio'
 
 interface Recipient {
 	name: string
@@ -26,7 +26,9 @@ const fetchFlavors = async (): Promise<string[]> => {
 
 	// Parse the names of the cookies from the response
 	const dom = new JSDOM(data)
-	const flavors = Array.from(dom.window.document.querySelectorAll('#weekly-cookie-flavors h3'))
+	const flavors = Array.from(
+		dom.window.document.querySelectorAll('#weekly-cookie-flavors h3')
+	)
 		.map((element) => element.textContent?.trim())
 		.filter((flavor) => typeof flavor === 'string')
 		.slice(0, 6)
@@ -41,23 +43,14 @@ const formatMessage = (recipient: Recipient, flavors: string[]) => {
 	return `${greeting}\n\n${flavorsString}\n\n${CRUMBL_URL}`
 }
 
-// Sends the current crumbl flavors to each of the given recipients
-const crumblNotifier = async (recipients: Recipient[]) => {
-	if (recipients.length === 0) return
-	const flavors = await fetchFlavors()
-
+const notify = (message: string, recipient: Recipient) => {
 	const { sid, token, sender } = functions.config().twilio
 	const smsClient = twilio(sid, token)
-	const messages = recipients.map((recipient) =>
-		smsClient.messages.create({
-			from: sender,
-			to: recipient.phone,
-			body: formatMessage(recipient, flavors),
-		})
-	)
-
-	// Wait for all of the messages to send before returning
-	await Promise.all(messages)
+	return smsClient.messages.create({
+		from: sender,
+		to: recipient.phone,
+		body: message,
+	})
 }
 
 // Every sunday at 6:30pm send the crumbl flavors to the stored recipients
@@ -66,5 +59,26 @@ export const notifier = functions.pubsub
 	.timeZone('America/Phoenix')
 	.onRun(async () => {
 		const recipients = await fetchRecipients()
-		await crumblNotifier(recipients)
+		const flavors = await fetchFlavors()
+
+		try {
+			const messages = recipients.map((recipient) => {
+				const message = formatMessage(recipient, flavors)
+				return notify(message, recipient)
+			})
+
+			// Wait for every message to send before continuing
+			await Promise.all(messages)
+		} catch (error) {
+			console.error(`There was an issue notifying the recipients: ${error}`)
+		}
+
+		try {
+			await firebase.firestore().collection('history').add({
+				flavors,
+				time: admin.firestore.FieldValue.serverTimestamp(),
+			})
+		} catch (error) {
+			console.error(`There was an issue storing the flavor history: ${error}`)
+		}
 	})
