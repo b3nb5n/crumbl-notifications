@@ -3,11 +3,15 @@ import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
 import { JSDOM } from 'jsdom'
 import twilio from 'twilio'
+import { z } from 'zod'
 
-interface Recipient {
-	name: string
-	phone: string
-}
+const recipientSchema = z.object({
+	name: z.string(),
+	lastName: z.string().optional(), // Not actually used anywhere just so I can tell whos who
+	phone: z.string().regex(/^\+1\d{10}$/),
+})
+
+type Recipient = z.TypeOf<typeof recipientSchema>
 
 const firebase = admin.initializeApp()
 const CRUMBL_URL = 'crumblcookies.com'
@@ -53,6 +57,22 @@ const notify = (message: string, recipient: Recipient) => {
 	})
 }
 
+// Sends a formatted message containing the given `flavors` to each of the given `recipients`
+const crumblNotifier = (flavors: string[], recipients: Recipient[]) => {
+	const { sid, token, sender } = functions.config().twilio
+	const smsClient = twilio(sid, token)
+	const messages = recipients.map((recipient) =>
+		smsClient.messages.create({
+			from: sender,
+			to: recipient.phone,
+			body: formatMessage(recipient, flavors),
+		})
+	)
+
+	// Return a promise that will wait for every message to be sent
+	return Promise.all(messages)
+}
+
 // Every sunday at 6:30pm send the crumbl flavors to the stored recipients
 export const notifier = functions.pubsub
 	.schedule('30 18 * * 0')
@@ -62,13 +82,7 @@ export const notifier = functions.pubsub
 		const flavors = await fetchFlavors()
 
 		try {
-			const messages = recipients.map((recipient) => {
-				const message = formatMessage(recipient, flavors)
-				return notify(message, recipient)
-			})
-
-			// Wait for every message to send before continuing
-			await Promise.all(messages)
+			await crumblNotifier(flavors, recipients)
 		} catch (error) {
 			console.error(`There was an issue notifying the recipients: ${error}`)
 		}
@@ -80,5 +94,20 @@ export const notifier = functions.pubsub
 			})
 		} catch (error) {
 			console.error(`There was an issue storing the flavor history: ${error}`)
+		}
+	})
+
+// Notifies new recipients as soon as they are added
+export const newMemberNotifier = functions.firestore
+	.document('recipients/{id}')
+	.onCreate(async (doc, ctx) => {
+		const recipient = recipientSchema.parse(doc.data())
+		const flavors = await fetchFlavors()
+
+		try {
+			const message = formatMessage(recipient, flavors)
+			await notify(message, recipient)
+		} catch (error) {
+			console.error(`There was an issue notifying a new recipient: ${error}`)
 		}
 	})
