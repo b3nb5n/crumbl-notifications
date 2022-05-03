@@ -9,10 +9,8 @@ const recipientSchema = z.object({
 	firstName: z.string(),
 	lastName: z.string().optional(), // Not actually used anywhere just so I can tell whos who
 	phone: z.string().regex(/^\+1\d{10}$/),
-	favorites: z.array(z.string()).optional(),
-	notifications: z.object({
-		weekly: z.boolean(),
-	}),
+	favorites: z.array(z.string()).default([]),
+	notifications: z.object({ weekly: z.boolean().default(true) }).default({}),
 })
 
 type Recipient = z.TypeOf<typeof recipientSchema>
@@ -52,7 +50,7 @@ const formatFlavors = (flavors: string[]) =>
 	flavors.map((flavor) => `🍪 ${flavor}`).join('\n')
 
 // Sends a formatted message containing the given `flavors` to each of the given `recipients`
-const flavorNotifier = (flavors: string[], recipients: Recipient[]) => {
+const flavorsNotifier = (flavors: string[], recipients: Recipient[]) => {
 	const messages = recipients.map((recipient) => {
 		const greeting = `Hey ${recipient.firstName}, this weeks crumbl flavors are:`
 
@@ -64,12 +62,12 @@ const flavorNotifier = (flavors: string[], recipients: Recipient[]) => {
 	})
 
 	// Return a promise that will wait for every message to be sent
-	return Promise.all(messages)
+	return Promise.allSettled(messages)
 }
 
 // Sends each of the given `recipients` a message listing each of their favorite
 // flavors that are included in the `flavors` list
-const favoriteNotifier = (flavors: string[], recipients: Recipient[]) => {
+const favoritesNotifier = (flavors: string[], recipients: Recipient[]) => {
 	const messages = recipients.map((recipient) => {
 		if (!recipient.favorites) return
 		const greeting = `Hey ${recipient.firstName}, crumbl has some of your favorites this week`
@@ -84,48 +82,49 @@ const favoriteNotifier = (flavors: string[], recipients: Recipient[]) => {
 		})
 	})
 
-	return Promise.all(messages)
+	return Promise.allSettled(messages)
 }
 
-// Every sunday at 6:30pm send the crumbl flavors to the stored recipients
-export const notifier = functions.pubsub
+// Sends all notifications to the given `recipients`
+const notify = async (recipients?: Recipient[]) => {
+	recipients ??= await fetchRecipients()
+	const flavors = await fetchFlavors()
+
+	const weeklyRecipients = recipients.filter(
+		(recipient) => recipient.notifications.weekly
+	)
+	const favoritesRecipients = recipients.filter(
+		(recipient) => recipient.favorites.length > 0
+	)
+
+	const notifiers = [
+		flavorsNotifier(flavors, weeklyRecipients),
+		favoritesNotifier(flavors, favoritesRecipients),
+	] as const
+
+	return Promise.allSettled(notifiers)
+}
+
+// Every sunday at 6:30pm send flavor and favorite notifications
+export const weekly_notifier = functions.pubsub
 	.schedule('30 18 * * 0')
 	.timeZone('America/Phoenix')
 	.onRun(async () => {
-		const recipients = await fetchRecipients()
-		const flavors = await fetchFlavors()
-
-		try {
-			const weeklyRecipients = recipients.filter(
-				(recipient) => recipient.notifications.weekly
-			)
-
-			await flavorNotifier(flavors, weeklyRecipients)
-		} catch (error) {
-			console.error(`There was an issue sending flavors notifications: ${error}`)
-		}
-
-		try {
-			const favoritesRecipients = recipients.filter(
-				(recipient) => !recipient.notifications
-			)
-
-			await favoriteNotifier(flavors, favoritesRecipients)
-		} catch (error) {
-			console.error(`There was an issue sending favorites notifications: ${error}`)
+		const results = await notify()
+		for (const message of results.flat()) {
+			if (message.status === 'rejected')
+				console.error(`There was an issue sending a message: ${message.reason}`)
 		}
 	})
 
 // Notifies new recipients as soon as they are added
-export const newMemberNotifier = functions.firestore
+export const new_member_notifier = functions.firestore
 	.document('recipients/{id}')
 	.onCreate(async (doc) => {
 		const recipient = recipientSchema.parse(doc.data())
-		const flavors = await fetchFlavors()
-
-		try {
-			await flavorNotifier(flavors, [recipient])
-		} catch (error) {
-			console.error(`There was an issue notifying a new recipient: ${error}`)
+		const results = await notify([recipient])
+		for (const message of results.flat()) {
+			if (message.status === 'rejected')
+				console.error(`There was an issue sending a message: ${message.reason}`)
 		}
 	})
