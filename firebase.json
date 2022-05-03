@@ -1,28 +1,21 @@
 {
-  "functions": {
-    "predeploy": [
-      "npm --prefix \"$RESOURCE_DIR\" run build"
-    ],
-    "source": ".",
-    "runtime": "nodejs16",
-    "ignore": [
-      "node_modules",
-      "index.ts",
-      "tsconfig.json"
-    ]
-  },
-  "emulators": {
-    "functions": {
-      "port": 5001
-    },
-    "firestore": {
-      "port": 8080
-    },
-    "ui": {
-      "enabled": true
-    },
-    "pubsub": {
-      "port": 8085
-    }
-  }
+	"functions": {
+		"source": "src",
+		"runtime": "nodejs16",
+		"ignore": ["node_modules", "index.ts", "tsconfig.json"]
+	},
+	"emulators": {
+		"functions": {
+			"port": 5001
+		},
+		"firestore": {
+			"port": 8080
+		},
+		"ui": {
+			"enabled": true
+		},
+		"pubsub": {
+			"port": 8085
+		}
+	}
 }

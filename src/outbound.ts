@@ -26,7 +26,7 @@ const firebase = admin.initializeApp()
 const fetchRecipients = async () => {
 	const db = admin.firestore(firebase)
 	const recipientsSnap = await db.collection('recipients').get()
-	return recipientsSnap.docs.map((doc) => doc.data() as Recipient)
+	return recipientsSnap.docs.map((doc) => recipientSchema.parse(doc.data()))
 }
 
 // Retrieves the names of the current flavors from the crumbl website
