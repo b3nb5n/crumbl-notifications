@@ -6,15 +6,23 @@ import twilio from 'twilio'
 import { z } from 'zod'
 
 const recipientSchema = z.object({
-	name: z.string(),
+	firstName: z.string(),
 	lastName: z.string().optional(), // Not actually used anywhere just so I can tell whos who
 	phone: z.string().regex(/^\+1\d{10}$/),
+	favorites: z.array(z.string()).optional(),
+	notifications: z.object({
+		weekly: z.boolean(),
+	}),
 })
 
 type Recipient = z.TypeOf<typeof recipientSchema>
 
-const firebase = admin.initializeApp()
 const CRUMBL_URL = 'crumblcookies.com'
+
+// Initialize twilio and firebase
+const { sid, token, sender } = functions.config().twilio
+const smsClient = twilio(sid, token)
+const firebase = admin.initializeApp()
 
 // Retrieves the recipients from the database
 const fetchRecipients = async () => {
@@ -40,36 +48,42 @@ const fetchFlavors = async (): Promise<string[]> => {
 	return flavors as string[]
 }
 
-// Formats a recipient and a list of flavors into a text message body
-const formatMessage = (recipient: Recipient, flavors: string[]) => {
-	const greeting = `Hey ${recipient.name}, this weeks crumbl flavors are:`
-	const flavorsString = flavors.map((flavor) => `🍪 ${flavor}`).join('\n')
-	return `${greeting}\n\n${flavorsString}\n\n${CRUMBL_URL}`
-}
-
-const notify = (message: string, recipient: Recipient) => {
-	const { sid, token, sender } = functions.config().twilio
-	const smsClient = twilio(sid, token)
-	return smsClient.messages.create({
-		from: sender,
-		to: recipient.phone,
-		body: message,
-	})
-}
+const formatFlavors = (flavors: string[]) =>
+	flavors.map((flavor) => `🍪 ${flavor}`).join('\n')
 
 // Sends a formatted message containing the given `flavors` to each of the given `recipients`
-const crumblNotifier = (flavors: string[], recipients: Recipient[]) => {
-	const { sid, token, sender } = functions.config().twilio
-	const smsClient = twilio(sid, token)
-	const messages = recipients.map((recipient) =>
-		smsClient.messages.create({
+const flavorNotifier = (flavors: string[], recipients: Recipient[]) => {
+	const messages = recipients.map((recipient) => {
+		const greeting = `Hey ${recipient.firstName}, this weeks crumbl flavors are:`
+
+		return smsClient.messages.create({
 			from: sender,
 			to: recipient.phone,
-			body: formatMessage(recipient, flavors),
+			body: `${greeting}\n\n${formatFlavors(flavors)}\n\n${CRUMBL_URL}`,
 		})
-	)
+	})
 
 	// Return a promise that will wait for every message to be sent
+	return Promise.all(messages)
+}
+
+// Sends each of the given `recipients` a message listing each of their favorite
+// flavors that are included in the `flavors` list
+const favoriteNotifier = (flavors: string[], recipients: Recipient[]) => {
+	const messages = recipients.map((recipient) => {
+		if (!recipient.favorites) return
+		const greeting = `Hey ${recipient.firstName}, crumbl has some of your favorites this week`
+		const available = recipient.favorites.filter((favorite) =>
+			flavors.includes(favorite)
+		)
+
+		return smsClient.messages.create({
+			from: sender,
+			to: recipient.phone,
+			body: `${greeting}:\n\n${formatFlavors(available)}\n\n${CRUMBL_URL}`,
+		})
+	})
+
 	return Promise.all(messages)
 }
 
@@ -82,31 +96,35 @@ export const notifier = functions.pubsub
 		const flavors = await fetchFlavors()
 
 		try {
-			await crumblNotifier(flavors, recipients)
+			const weeklyRecipients = recipients.filter(
+				(recipient) => recipient.notifications.weekly
+			)
+
+			await flavorNotifier(flavors, weeklyRecipients)
 		} catch (error) {
-			console.error(`There was an issue notifying the recipients: ${error}`)
+			console.error(`There was an issue sending flavors notifications: ${error}`)
 		}
 
 		try {
-			await firebase.firestore().collection('history').add({
-				flavors,
-				time: admin.firestore.FieldValue.serverTimestamp(),
-			})
+			const favoritesRecipients = recipients.filter(
+				(recipient) => !recipient.notifications
+			)
+
+			await favoriteNotifier(flavors, favoritesRecipients)
 		} catch (error) {
-			console.error(`There was an issue storing the flavor history: ${error}`)
+			console.error(`There was an issue sending favorites notifications: ${error}`)
 		}
 	})
 
 // Notifies new recipients as soon as they are added
 export const newMemberNotifier = functions.firestore
 	.document('recipients/{id}')
-	.onCreate(async (doc, ctx) => {
+	.onCreate(async (doc) => {
 		const recipient = recipientSchema.parse(doc.data())
 		const flavors = await fetchFlavors()
 
 		try {
-			const message = formatMessage(recipient, flavors)
-			await notify(message, recipient)
+			await flavorNotifier(flavors, [recipient])
 		} catch (error) {
 			console.error(`There was an issue notifying a new recipient: ${error}`)
 		}
